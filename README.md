@@ -25,7 +25,6 @@ Socket server which accept http requests
 3. Run app
    ```
     python3 main.py
-
 ***
 ## Test process
 ```
