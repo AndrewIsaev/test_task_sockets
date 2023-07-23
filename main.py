@@ -6,12 +6,12 @@ from faker import Faker
 
 fake = Faker()
 
-sio = socketio.AsyncServer(async_mode='aiohttp')
+sio = socketio.AsyncServer(async_mode="aiohttp")
 routes = web.RouteTableDef()
 
 users: dict[str, User] = {}
-user_counter: int = 0
-room_counter: int = 0
+#user_counter: int = 0
+#room_counter: int = 0
 rooms: dict[int, Room] = {}
 
 
@@ -23,8 +23,7 @@ async def connect(sid: str, environ: dict) -> None:
     :param environ:
     :return: None
     """
-    global user_counter
-    user_counter += 1
+    user_counter = len(users) + 1
 
     user: User = User(id=user_counter, name=fake.name(), sid=sid)
     users[sid] = user
@@ -40,16 +39,19 @@ async def host(sid: str, data: dict[str, str]) -> None:
     :param data: dict {"room_name": "room name" }
     :return: None
     """
-    global room_counter
-    room_counter += 1
-    room: Room = Room(id=room_counter, title=fake.sentence(nb_words=2, variable_nb_words=False), host=users[sid],
-                      members=[])
+    room_counter = len(rooms) + 1
+    room: Room = Room(
+        id=room_counter,
+        title=fake.sentence(nb_words=2, variable_nb_words=False),
+        host=users[sid],
+        members=[],
+    )
 
     users[sid].room = room.title
     room.add_member(users[sid])
     rooms[room.id] = room
 
-    await sio.emit("message", data=room.model_dump_json())
+    await sio.emit("message", to=sid, data=room.model_dump_json())
 
 
 @sio.on("join")
@@ -67,7 +69,7 @@ async def join(sid: str, data: dict[str, int]) -> None:
     room.add_member(users[sid])
     user.room = room.title
 
-    await sio.emit("message", data=room.model_dump_json())
+    await sio.emit("message", to=sid, data=room.model_dump_json())
 
 
 @sio.on("leave")
@@ -85,13 +87,15 @@ async def leave(sid: str, data: dict[str, int]) -> None:
         user.room = None
         room.remove_member(user)
     else:
-        await sio.emit("message", data={"message": "Host can`t leave the room"})
+        await sio.emit("message", to=sid, data={"message": "Host can`t leave the room"})
 
 
 @sio.on("message/room")
 async def to_room(sid: str, data: dict[str, int]) -> None:
     room: Room = rooms[data["room_id"]]
-    await sio.emit("message", to=room.title, data={"message": data["message"]})
+    user: User = users[sid]
+    if room.host == user:
+        await sio.emit("message", room=room.title, data={"message": data["message"]})
 
 
 @sio.event
@@ -106,9 +110,11 @@ async def show_rooms(request: web_request):
     :param request: request
     :return: Json with rooms
     """
-    data: list[dict[str, dict[str, int]]] = []
+    data: list[dict[str, dict[str, str | int]]] = []
     for room in rooms.values():
-        room_data: dict[str, dict[str, int]] = {room.title: {"host": room.host.name, "members": len(room.members)}}
+        room_data: dict[str, dict[str, str | int]] = {
+            room.title: {"host": room.host.name, "members": len(room.members)}
+        }
         data.append(room_data)
     return web.json_response(data=data)
 
@@ -117,5 +123,5 @@ app = web.Application()
 sio.attach(app)
 app.add_routes(routes)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     web.run_app(app)
